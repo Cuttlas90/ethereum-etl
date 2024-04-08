@@ -23,6 +23,7 @@
 import collections
 
 from sqlalchemy import create_engine
+from ethereumetl.streaming.postgres_tables import metadata
 
 from blockchainetl.jobs.exporters.converters.composite_item_converter import CompositeItemConverter
 
@@ -34,8 +35,8 @@ class PostgresItemExporter:
         self.item_type_to_insert_stmt_mapping = item_type_to_insert_stmt_mapping
         self.converter = CompositeItemConverter(converters)
         self.print_sql = print_sql
-
         self.engine = self.create_engine()
+        metadata.create_all(self.engine)
 
     def open(self):
         pass

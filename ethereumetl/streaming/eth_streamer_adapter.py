@@ -7,6 +7,7 @@ from ethereumetl.jobs.export_blocks_job import ExportBlocksJob
 from ethereumetl.jobs.export_receipts_job import ExportReceiptsJob
 from ethereumetl.jobs.export_traces_job import ExportTracesJob
 from ethereumetl.jobs.extract_contracts_job import ExtractContractsJob
+from ethereumetl.jobs.export_contracts_job_with_reciept import ExportContractsJobWithReciept
 from ethereumetl.jobs.extract_token_transfers_job import ExtractTokenTransfersJob
 from ethereumetl.jobs.extract_tokens_job import ExtractTokensJob
 from ethereumetl.streaming.enrich import enrich_transactions, enrich_logs, enrich_token_transfers, enrich_traces, \
@@ -64,7 +65,10 @@ class EthStreamerAdapter:
         # Export contracts
         contracts = []
         if self._should_export(EntityType.CONTRACT):
-            contracts = self._export_contracts(traces)
+            if self._should_export(EntityType.TRACE):
+                contracts = self._export_contracts(traces)
+            elif self._should_export(EntityType.RECEIPT):
+                contracts = self._export_contracts(receipts)
 
         # Export tokens
         tokens = []
@@ -160,14 +164,23 @@ class EthStreamerAdapter:
         traces = exporter.get_items('trace')
         return traces
 
-    def _export_contracts(self, traces):
+    def _export_contracts(self, iterable):
         exporter = InMemoryItemExporter(item_types=['contract'])
-        job = ExtractContractsJob(
-            traces_iterable=traces,
-            batch_size=self.batch_size,
-            max_workers=self.max_workers,
-            item_exporter=exporter
-        )
+        if self._should_export(EntityType.TRACE):
+            job = ExtractContractsJob(
+                traces_iterable=iterable,
+                batch_size=self.batch_size,
+                max_workers=self.max_workers,
+                item_exporter=exporter
+            )
+        elif self._should_export(EntityType.RECEIPT):
+            job = ExportContractsJobWithReciept(
+                recipets_iterable=iterable,
+                batch_size=self.batch_size,
+                batch_web3_provider=self.batch_web3_provider,
+                item_exporter=exporter,
+                max_workers=self.max_workers
+            )
         job.run()
         contracts = exporter.get_items('contract')
         return contracts
@@ -192,7 +205,7 @@ class EthStreamerAdapter:
             return EntityType.TRANSACTION in self.entity_types or self._should_export(EntityType.LOG)
 
         if entity_type == EntityType.RECEIPT:
-            return EntityType.TRANSACTION in self.entity_types or self._should_export(EntityType.TOKEN_TRANSFER)
+            return EntityType.TRANSACTION in self.entity_types or self._should_export(EntityType.TOKEN_TRANSFER) or (self._should_export(EntityType.CONTRACT) and not self._should_export(EntityType.TRACE))
 
         if entity_type == EntityType.LOG:
             return EntityType.LOG in self.entity_types or self._should_export(EntityType.TOKEN_TRANSFER)
@@ -201,7 +214,7 @@ class EthStreamerAdapter:
             return EntityType.TOKEN_TRANSFER in self.entity_types
 
         if entity_type == EntityType.TRACE:
-            return EntityType.TRACE in self.entity_types or self._should_export(EntityType.CONTRACT)
+            return EntityType.TRACE in self.entity_types or (self._should_export(EntityType.CONTRACT) and not self._should_export(EntityType.RECEIPT))
 
         if entity_type == EntityType.CONTRACT:
             return EntityType.CONTRACT in self.entity_types or self._should_export(EntityType.TOKEN)
